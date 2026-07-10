@@ -11,76 +11,60 @@ parseMode :: enum {
   makingBlock,
 }
 
-parseRoot :: proc(s: string)->astRoot {
-  strs := strings.split_lines(s)
+parseRoot :: proc(s: string)->(out: astRoot) {
+  lines := strings.split_lines(s)
 
-  for str, i in strs {
-    endIndex := strings.index_byte(str, '#')
-    if endIndex == -1 {endIndex = len(str)}
-    strs[i] = strings.trim_right_space(
-      str[:endIndex]
+  for line, i in lines {
+    endIndex := strings.index_byte(line, '#')
+    if endIndex == -1 {endIndex = len(line)}
+    lines[i] = strings.trim_right_space(
+      line[:endIndex]
     )
   }
 
-  strs = slice.filter(strs, proc(x: string)->bool{return x!=""})
+  lines = slice.filter(lines, proc(x: string)->bool{return x!=""})
 
-  funcMapOutput := runtime.make_map(map[string]astFuncAnon)
+  isLineAFuncTitle := proc(line: string)->bool{return strings.trim_left_space(line) == line}
 
-  funcCount := 0
-  for str in strs {
-    if strings.trim_left_space(str) == str {
-      funcCount += 1
-    }
-  }
-  funcNameIndecies := make([]uint, funcCount)
+  funcLabelIndecies := make([]uint, slice.count_proc(lines, isLineAFuncTitle))
 
-  funcIndex := 0
-  for str, strIndex in strs {
-    if strings.trim_left_space(str) == str {
-      funcNameIndecies[funcIndex] = uint(strIndex)
-      funcIndex+=1
+  funcIndexAcc := 0
+  for line, i in lines {
+    if isLineAFuncTitle(line) {
+      funcLabelIndecies[funcIndexAcc] = uint(i)
+      funcIndexAcc+=1
     }
   }
 
-  for i in 0..<funcCount {
-    registerMaxUsage: uint
-
-    currentIndex := funcNameIndecies[i]
-    nextIndex: uint
-    if i+1 >= funcCount {
-      nextIndex = len(strs)
-    } else {
-      nextIndex = funcNameIndecies[i+1]
-    }
+  for funcLabelIndex, i in funcLabelIndecies {
+    nextIndex:uint = len(lines) if i+1 >= len(funcLabelIndecies) else funcLabelIndecies[i+1]
 
     // Parse body
-    bodyStrs := strs[currentIndex+1:nextIndex]
-    assert(len(bodyStrs) > 0)
-    bodyIndent := bodyStrs[0][0:len(bodyStrs[0]) - len(strings.trim_left_space(bodyStrs[0]))]
-    assert(bodyIndent != "")
+    bodyLines := lines[funcLabelIndex+1:nextIndex]
+    assert(len(bodyLines) > 0, "Functions require a minimum of one block, which wasn't found")
+    bodyIndent := bodyLines[0][0:len(bodyLines[0]) - len(strings.trim_left_space(bodyLines[0]))]
+    assert(bodyIndent != "", "INTERNAL: body indent was somehow empty which should be impossible")
 
-    blockCount: uint
-
-    for line, i in bodyStrs {
-      assert(strings.has_prefix(line, bodyIndent))
-      lineTrimmed := line[len(bodyIndent):]
-      bodyStrs[i] = lineTrimmed
-      if strings.trim_left_space(lineTrimmed) == lineTrimmed {
-        blockCount += 1
-      }
+    for bodyLine, i in bodyLines {
+      assert(strings.has_prefix(bodyLine, bodyIndent))
+      lineTrimmed := bodyLine[len(bodyIndent):]
+      bodyLines[i] = lineTrimmed
     }
+
+    isBlockTitle := proc(bodyLine: string)->bool{return strings.trim_left_space(bodyLine) == bodyLine}
+    blockCount := slice.count_proc(bodyLines, isBlockTitle)
 
     blockNames := make([]string, blockCount)
     blockIndecies := make([]uint, blockCount)
     blocks := make([]astBlock, blockCount)
 
     // Just to generate the indecies so I can do a look-ahead
-    blockIndex := 0
-    for line, i in bodyStrs {
-      if strings.trim_left_space(line) == line {
-        blockNames[blockIndex] = line // TODO line should contain type info too, rn it's assumed to just be name of block
-        blockIndecies[blockIndex] = currentIndex+1+uint(i)
-        blockIndex += 1
+    blockIndexAcc := 0
+    for bodyLine, i in bodyLines {
+      if isBlockTitle(bodyLine) {
+        blockNames[blockIndexAcc] = bodyLine // TODO line should contain type info too, rn it's assumed to just be name of block
+        blockIndecies[blockIndexAcc] = funcLabelIndex+1+uint(i)
+        blockIndexAcc += 1
       }
     }
 
@@ -88,24 +72,19 @@ parseRoot :: proc(s: string)->astRoot {
       // new block
       blockEndIndex: uint
       if blockIndex+1 >= len(blockIndecies) {
-        blockEndIndex = len(strs)
+        blockEndIndex = len(lines)
       } else {
         blockEndIndex = blockIndecies[blockIndex+1]
       }
-      fmt.println(strs[blockBeginIndex])
-      stmtStrs := strs[blockBeginIndex+1:blockEndIndex]
-      fmt.println(stmtStrs)
-      stmts := make([]astStmt, len(stmtStrs))
+      stmtLines := lines[blockBeginIndex+1:blockEndIndex]
+      stmts := make([]astStmt, len(stmtLines))
 
       stmtIndent := ""
-      if len(stmtStrs) > 0 {
-        stmtIndent = stmtStrs[0][: len(stmtStrs[0]) - len(strings.trim_left_space(stmtStrs[0])) ]
+      if len(stmtLines) > 0 {
+        stmtIndent = stmtLines[0][:len(stmtLines[0]) - len(strings.trim_left_space(stmtLines[0])) ]
       }
 
-      for stmtStr, i in stmtStrs {
-        fmt.println(stmtStr)
-        fmt.println(stmtIndent == "")
-        fmt.println("next")
+      for stmtStr, i in stmtLines {
         assert(strings.has_prefix(stmtStr, stmtIndent))
         stmt := stmtStr[len(stmtIndent):]
 
@@ -114,7 +93,6 @@ parseRoot :: proc(s: string)->astRoot {
         fnStr, _, argsStr := strings.partition(callStr, "(")
         assert(argsStr[len(argsStr)-1] == ')')
         argsStr = argsStr[:len(argsStr)-1]
-        fmt.println(outsStr)
         args := strings.split(outsStr, ",")
         outs := strings.split(outsStr, ",")
         fnLoc, found := slice.linear_search(primitiveNames, fnStr)
@@ -134,9 +112,8 @@ parseRoot :: proc(s: string)->astRoot {
       }
     }
 
-    funcName := strs[currentIndex]
-    funcMapOutput[funcName] = {registerMaxUsage, blocks}
+    funcName := lines[funcLabelIndex]
+    out.funcs[funcName] = {0, blocks} // registerMaxUsage: uint // TODO
   }
-
-  return {funcMapOutput}
+  return
 }
