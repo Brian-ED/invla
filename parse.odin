@@ -11,6 +11,14 @@ parseMode :: enum {
   makingBlock,
 }
 
+getIndent :: proc(referenceLine: string)->string {
+  return referenceLine[:len(referenceLine) - len(strings.trim_left_space(referenceLine))]
+}
+
+hasWhitespacePrefix :: proc(bodyLine: string)->bool {
+  return strings.trim_left_space(bodyLine) == bodyLine
+}
+
 parseRoot :: proc(s: string)->(out: astRoot) {
   lines := strings.split_lines(s)
 
@@ -24,35 +32,33 @@ parseRoot :: proc(s: string)->(out: astRoot) {
 
   lines = slice.filter(lines, proc(x: string)->bool{return x!=""})
 
-  isLineAFuncTitle := proc(line: string)->bool{return strings.trim_left_space(line) == line}
-
-  funcLabelIndecies := make([]uint, slice.count_proc(lines, isLineAFuncTitle))
+  funcLabelIndecies := make([]uint, slice.count_proc(lines, hasWhitespacePrefix))
 
   funcIndexAcc := 0
   for line, i in lines {
-    if isLineAFuncTitle(line) {
+    if hasWhitespacePrefix(line) {
       funcLabelIndecies[funcIndexAcc] = uint(i)
       funcIndexAcc+=1
     }
   }
 
   for funcLabelIndex, i in funcLabelIndecies {
-    nextIndex:uint = len(lines) if i+1 >= len(funcLabelIndecies) else funcLabelIndecies[i+1]
+    beginOfBodyIndex := funcLabelIndex+1
+    endOfBodyIndex:uint = len(lines) if i+1 >= len(funcLabelIndecies) else funcLabelIndecies[i+1]
 
     // Parse body
-    bodyLines := lines[funcLabelIndex+1:nextIndex]
+    bodyLines := lines[beginOfBodyIndex:endOfBodyIndex]
     assert(len(bodyLines) > 0, "Functions require a minimum of one block, which wasn't found")
-    bodyIndent := bodyLines[0][0:len(bodyLines[0]) - len(strings.trim_left_space(bodyLines[0]))]
+    bodyIndent := getIndent(bodyLines[0])
     assert(bodyIndent != "", "INTERNAL: body indent was somehow empty which should be impossible")
 
+    // Trim indent from body lines
     for bodyLine, i in bodyLines {
       assert(strings.has_prefix(bodyLine, bodyIndent))
-      lineTrimmed := bodyLine[len(bodyIndent):]
-      bodyLines[i] = lineTrimmed
+      bodyLines[i] = bodyLine[len(bodyIndent):]
     }
 
-    isBlockTitle := proc(bodyLine: string)->bool{return strings.trim_left_space(bodyLine) == bodyLine}
-    blockCount := slice.count_proc(bodyLines, isBlockTitle)
+    blockCount := slice.count_proc(bodyLines, hasWhitespacePrefix)
 
     blockNames := make([]string, blockCount)
     blockIndecies := make([]uint, blockCount)
@@ -61,28 +67,20 @@ parseRoot :: proc(s: string)->(out: astRoot) {
     // Just to generate the indecies so I can do a look-ahead
     blockIndexAcc := 0
     for bodyLine, i in bodyLines {
-      if isBlockTitle(bodyLine) {
+      if hasWhitespacePrefix(bodyLine) {
         blockNames[blockIndexAcc] = bodyLine // TODO line should contain type info too, rn it's assumed to just be name of block
-        blockIndecies[blockIndexAcc] = funcLabelIndex+1+uint(i)
+        blockIndecies[blockIndexAcc] = beginOfBodyIndex+uint(i)
         blockIndexAcc += 1
       }
     }
 
     for blockBeginIndex, blockIndex in blockIndecies {
       // new block
-      blockEndIndex: uint
-      if blockIndex+1 >= len(blockIndecies) {
-        blockEndIndex = len(lines)
-      } else {
-        blockEndIndex = blockIndecies[blockIndex+1]
-      }
+      blockEndIndex:uint = len(lines) if blockIndex+1 >= len(blockIndecies) else blockIndecies[blockIndex+1]
       stmtLines := lines[blockBeginIndex+1:blockEndIndex]
       stmts := make([]astStmt, len(stmtLines))
 
-      stmtIndent := ""
-      if len(stmtLines) > 0 {
-        stmtIndent = stmtLines[0][:len(stmtLines[0]) - len(strings.trim_left_space(stmtLines[0])) ]
-      }
+      stmtIndent := "" if len(stmtLines) > 0 else getIndent(stmtLines[0])
 
       for stmtStr, i in stmtLines {
         assert(strings.has_prefix(stmtStr, stmtIndent))
