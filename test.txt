@@ -1,0 +1,6 @@
+main
+  block1
+    out1,out2=print(in1,in2)
+  block2
+    out3,out4=print(in3,in4)
+    out5,out6=print(in5,in6)
