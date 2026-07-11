@@ -11,8 +11,13 @@ astStmt :: struct {
   outputs: []uint,
 }
 
+typedArg :: struct{
+  loc: uint,
+  type: astType,
+}
+
 astBlock :: struct {
-  argTypes: []astType,
+  inputs, outputs: []typedArg,
   stmts: []astStmt,
 }
 

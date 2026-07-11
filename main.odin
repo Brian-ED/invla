@@ -32,7 +32,7 @@ main :: proc() {
         registerMaxUsage = 1,
         blocks = {
           astBlock{
-            []astType{},
+            {}, {},
             []astStmt{
               astStmt{
                 1,

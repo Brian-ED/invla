@@ -1,10 +1,9 @@
 main
-  block1
-    a,b,c=print()
-    g,a,q=print(a,b)
-    =print(a,c,g)
-    =print(q)
-  block2
+  block1(in:S)=out1:S,out2:S
+    a,b,c=print(in)
+    out1,a,out2=print(a,b)
+    =print(a,c)
+  block2()=
     a,b,c=print()
     g,a,q=print(a,b)
     =print(a,c,g)

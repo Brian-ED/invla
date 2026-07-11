@@ -77,23 +77,78 @@ parseStmt :: proc(stmt: string, seenNamesInFn: ^[dynamic]string)->astStmt {
   }
 }
 
+charToType :: proc(s: string)->(t: astType) {
+  switch s {
+    case "S": t=astType.ast_str
+    case "R": t=astType.ast_rat
+    case:
+      assert(false, strings.concatenate([]string{"Invalid type: \"", s, "\""}))
+  }
+  return
+}
+
 parseBlock :: proc(blockLines: []string, seenNamesInFn: ^[dynamic]string)->(blockName: string, block: astBlock) {
-  blockName = blockLines[0]
+  blockLabel := blockLines[0]
+
+  argsAndOuts: string
+  blockName, _, argsAndOuts = strings.partition(blockLabel, "(")
+  blockArgsString, _, blockOutsString := strings.partition(argsAndOuts, ")=")
+
+  blockArgs := strings.split(blockArgsString, ",")
+  blockOuts := strings.split(blockOutsString, ",")
+
+  if len(blockArgs) == 1 && blockArgs[0] == "" {blockArgs={}}
+  if len(blockOuts) == 1 && blockOuts[0] == "" {blockOuts={}}
+
+  block.inputs = make([]typedArg, len(blockArgs))
+  block.outputs = make([]typedArg, len(blockOuts))
+
+  for arg, i in blockArgs {
+    argName, _, argType := strings.partition(arg, ":")
+    seen := false
+    nameIndex: uint
+    for name, i in seenNamesInFn {
+      if (name == argName) {
+        seen := true
+        nameIndex := i
+        break
+      }
+    }
+    if !seen {
+      nameIndex = len(seenNamesInFn)
+      append(&seenNamesInFn^, argName)
+    }
+    block.inputs[i].type = charToType(argType)
+    block.inputs[i].loc = nameIndex
+  }
+
+  for out, i in blockOuts {
+    seen := false
+    nameIndex: uint
+    for name, i in seenNamesInFn {
+      if (name == out) {
+        seen := true
+        nameIndex := i
+        break
+      }
+    }
+    if !seen {
+      nameIndex = len(seenNamesInFn)
+      append(&seenNamesInFn^, out)
+    }
+    block.outputs[i].loc = nameIndex
+  }
 
   stmtLines := blockLines[1:]
-  stmts := make([]astStmt, len(stmtLines))
+  block.stmts = make([]astStmt, len(stmtLines))
 
   stmtIndent := "" if len(stmtLines) == 0 else getIndent(stmtLines[0])
 
   for stmtStr, i in stmtLines {
     assert(strings.has_prefix(stmtStr, stmtIndent))
-    stmts[i] = parseStmt(stmtStr[len(stmtIndent):], &seenNamesInFn^)
+    block.stmts[i] = parseStmt(stmtStr[len(stmtIndent):], &seenNamesInFn^)
   }
 
-  block = {
-    []astType{}, // TODO line should contain type info too gotten from block header, which is just `line`
-    stmts,
-  }
   return
 }
 
