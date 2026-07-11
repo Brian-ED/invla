@@ -19,7 +19,7 @@ hasWhitespacePrefix :: proc(bodyLine: string)->bool {
   return strings.trim_left_space(bodyLine) == bodyLine
 }
 
-parseStmt :: proc(stmt: string)->astStmt {
+parseStmt :: proc(stmt: string, seenNamesInFn: ^[dynamic]string)->astStmt {
   outsStr, _, callStr := strings.partition(stmt, "=")
   fnStr, _, argsStr := strings.partition(callStr, "(")
   assert(argsStr[len(argsStr)-1] == ')')
@@ -28,32 +28,73 @@ parseStmt :: proc(stmt: string)->astStmt {
   outs := strings.split(outsStr, ",")
   fnLoc, found := slice.linear_search(primitiveNames, fnStr)
   if !found {
-    assert(false, "Not implemented") // TODO implement user-made function calling
+    assert(false, "INTERNAL: Not implemented") // TODO implement user-made function calling
+  }
+  inputs := make([]uint, len(args))
+  outputs := make([]uint, len(outs))
+
+  // Potential optimization here is instead of linear search for every arg you could *atleast*
+  // insert the strings such that it's ordered and finding is O(log(n))... But also
+  // you can use hashes or some set-based impl
+
+  for arg, i in args {
+    seen := false
+    nameIndex: uint
+    for name, i in seenNamesInFn {
+      if (name == arg) {
+        seen := true
+        nameIndex := i
+        break
+      }
+    }
+    if !seen {
+      nameIndex = len(seenNamesInFn)
+      append(&seenNamesInFn^, arg)
+    }
+    inputs[i] = nameIndex
+  }
+
+  for out, i in outs {
+    seen := false
+    nameIndex: uint
+    for name, i in seenNamesInFn {
+      if (name == out) {
+        seen := true
+        nameIndex := i
+        break
+      }
+    }
+    if !seen {
+      nameIndex = len(seenNamesInFn)
+      append(&seenNamesInFn^, out)
+    }
+    outputs[i] = nameIndex
   }
   return {
     uint(fnLoc),
-    make([]uint, len(args)),
-    make([]uint, len(outs)),
+    inputs,
+    outputs,
   }
 }
 
-parseBlock :: proc(blockLines: []string)->(string, astBlock) {
-  blockName := blockLines[0]
+parseBlock :: proc(blockLines: []string, seenNamesInFn: ^[dynamic]string)->(blockName: string, block: astBlock) {
+  blockName = blockLines[0]
 
   stmtLines := blockLines[1:]
   stmts := make([]astStmt, len(stmtLines))
 
-  stmtIndent := "" if len(stmtLines) > 0 else getIndent(stmtLines[0])
+  stmtIndent := "" if len(stmtLines) == 0 else getIndent(stmtLines[0])
 
   for stmtStr, i in stmtLines {
     assert(strings.has_prefix(stmtStr, stmtIndent))
-    stmts[i] = parseStmt(stmtStr[len(stmtIndent):])
+    stmts[i] = parseStmt(stmtStr[len(stmtIndent):], &seenNamesInFn^)
   }
 
-  return blockName, {
+  block = {
     []astType{}, // TODO line should contain type info too gotten from block header, which is just `line`
     stmts,
   }
+  return
 }
 
 // Parsing a function involves getting the header/title,
@@ -88,10 +129,13 @@ parseFunc :: proc(funcLines: []string)->(funcName: string, funcAnon: astFuncAnon
     }
   }
 
+  seenNamesInFn: [dynamic]string = {}
+  defer delete(seenNamesInFn)
+
   for blockBeginIndex, blockIndex in blockIndecies {
     // new block
     blockEndIndex:uint = len(bodyLines) if blockIndex+1 == len(blockIndecies) else blockIndecies[blockIndex+1]
-    blockName, block := parseBlock(bodyLines[blockBeginIndex:blockEndIndex])
+    blockName, block := parseBlock(bodyLines[blockBeginIndex:blockEndIndex], &seenNamesInFn)
     blocks[blockIndex] = block
   }
 
